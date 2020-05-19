@@ -1,3 +1,4 @@
+
 const functions = require('firebase-functions');
 
 const admin = require("firebase-admin");
@@ -28,6 +29,20 @@ const isEmpty = (string) => {
 	else return false;
 };
 
+parse = message => {
+	const {user, text, timestamp} = message.val()
+	const {key: _id} = message
+	const createdAt = new Date(timestamp)
+
+
+	return {
+		_id,
+		createdAt,
+		text,
+		user
+	}
+}
+
 firebase.initializeApp(firebaseConfig);
 
 const db = admin.firestore();
@@ -37,7 +52,7 @@ app.post("/signup", (req, res) => {
 	const newUser = {
 		email: req.body.email,
 		password: req.body.password,
-		username: req.body.username,
+		fullName: req.body.fullName,
 	};
 
 	let errors = {};
@@ -50,8 +65,8 @@ app.post("/signup", (req, res) => {
 	if (isEmpty(newUser.password)) {
 		errors.password = "Must not be empty";
 	}
-	if (isEmpty(newUser.username)) {
-		errors.username = "Must not be empty";
+	if (isEmpty(newUser.fullName)) {
+		errors.fullName = "Must not be empty";
 	}
 
 	if (Object.keys(errors).length > 0) {
@@ -63,13 +78,13 @@ app.post("/signup", (req, res) => {
 	//Validate sign up
 	let token, userId, imageUrl;
 
-	db.doc(`/users/${newUser.username}`)
+	db.doc(`/users/${newUser.fullName}`)
 		.get()
 		.then((doc) => {
 			if (doc.exists) {
 				return res
 					.status(400)
-					.json({ username: " this username is already taken " });
+					.json({ fullName: " this fullName is already taken " });
 			} else {
 				return firebase
 					.auth()
@@ -87,16 +102,16 @@ app.post("/signup", (req, res) => {
 		.then((idToken) => {
 			token = idToken;
 			const userCredentials = {
-				username: newUser.username,
+				fullName: newUser.fullName,
 				email: newUser.email,
 				createdAt: new Date().toISOString(),
-				imageUrl: `https://firebasestorage.googleapis.com/v0/b/${firebaseConfig.storageBucket}/o/${noImg}?alt=media`,
 				userId,
-				Trips: [],
+                Tasks: [],
+                messages: []
 			};
-			imageUrl = userCredentials.imageUrl;
+			
 
-			return db.doc(`/users/${newUser.username}`).set(userCredentials);
+			return db.doc(`/users/${newUser.fullName}`).set(userCredentials);
 			//return true
 		})
 		.then(() => {
@@ -179,7 +194,7 @@ app.post("/user", (req, res) => {
 			data.forEach((doc) => {
 				users.push({
 					userId: doc.data().userId,
-					username: doc.data().username,
+					fullName: doc.data().fullName,
 				});
 			});
 			return users;
@@ -187,7 +202,7 @@ app.post("/user", (req, res) => {
 		.then((array) => {
 			array.forEach((element) => {
 				if (element.userId == UserID.userId) {
-					return res.status(201).json(element.username);
+					return res.status(201).json(element.fullName);
 				}
 			});
 		})
@@ -196,5 +211,210 @@ app.post("/user", (req, res) => {
 			return res.status(403).json({ error: err.code });
 		});
 });
+
+app.get("/users", (req, res) => {
+	
+
+	db.collection("users")
+		.orderBy("createdAt", "desc")
+		.get()
+		.then((data) => {
+			let users = [];
+			data.forEach((doc) => {
+				users.push({
+					userId: doc.data().userId,
+					fullName: doc.data().fullName,
+				});
+			});
+			return users;
+		})
+		.then((users) => {
+			return res.status(201).json({users})
+		})
+		.catch((err) => {
+			console.error(err.code);
+			return res.status(403).json({ error: err.code });
+		});
+});
+
+
+
+app.post("/messages", (req, res)=>{
+    const incomingMessages = {
+        messages: req.body.messages,
+        fullName: req.body.fullName
+    }
+
+    if(incomingMessages.fullName){
+
+        incomingMessages.messages.forEach(
+            item => {
+                const message = {
+                    text: item.text,
+                    timestamp: item.createdAt,
+                    user: item.user
+                }
+    
+                db.collection("users")
+            .doc(`${incomingMessages.fullName}`)
+            .update({
+                messages : admin.firestore.FieldValue.arrayUnion(message),
+            })
+            .then((doc) => {
+                return res.status(201).json({ message: "Added succesfully" });
+            })
+            .catch((err) => {
+                console.log(err.code);
+                return res.status(500).json({ error: err.code });
+            });
+            }
+        )
+    }else return res.status(400).json({error: 'unauthenticated'})
+
+
+    
+    
+});
+
+app.put("/user/messages", (req, res) => {
+	const UserID = {
+		userId: req.body.userId,
+	};
+
+	db.collection("users")
+		.orderBy("createdAt", "desc")
+		.get()
+		.then((data) => {
+			let messages = [];
+			data.forEach((doc) => {
+				messages.push({
+					userId: doc.data().userId,
+					username: doc.data().username,
+					messages: doc.data().messages,
+				});
+			});
+			return messages;
+		})
+		.then((array) => {
+			array.forEach((element) => {
+				if (element.userId == UserID.userId) {
+					return res.status(201).json(element.messages);
+				}
+			});
+		})
+		.catch((err) => {
+			console.error(err.code);
+			return res.status(403).json({ error: err.code });
+		});
+});
+
+
+app.put("/messages", (req, res)=>{
+    const incomingMessages = {
+        fullName: req.body.fullName
+    }
+
+	db.collection("users")
+	.doc(`${incomingMessages.fullName}`)
+	.update({
+		messages: admin.firestore.FieldValue.delete(),
+	})
+	.then((doc) => {
+		return res.status(201).json({ message: "Deleted succesfully" });
+	})
+	.catch((err) => {
+		console.log(err.code);
+		return res.status(500).json({ error: err.code });
+	});
+
+    
+    
+});
+
+
+
+
+
+/*
+app.post("/create/chatroom", (req, res)=>{
+	const chatRoom = {
+		name: req.body.name
+	}
+
+
+	db.doc(`/chatroom/${chatRoom.name}`)
+			.get()
+			.then((doc) => {
+				if (doc.exists) {
+					return res
+						.status(400)
+						.json({ chatroom: "chatroom already exists" });
+				} else {
+					const messages = []
+
+					return db.doc(`/chatroom/${chatRoom.name}`).update({
+						messages: admin.firestore.FieldValue.arrayUnion(messages),
+					})
+				}
+			})
+			.then((response)=> {
+				res.status(201).json({message: "Created Successfully", response})
+			}).catch((err) => {
+				
+				return res.status(500).json({ error: err.code });
+				
+			});
+})
+
+app.post("/messages/chatroom", (req, res)=>{
+    const incomingMessages = {
+        messages: req.body.messages,
+        name: req.body.name
+    }
+
+    if(incomingMessages.name){
+
+        incomingMessages.messages.forEach(
+            item => {
+                const message = {
+                    text: item.text,
+                    timestamp: item.timestamp,
+                    user: item.user
+                }
+    
+                db.collection("chatroom")
+            .doc(`${incomingMessages.name}`)
+            .update({
+                messages : admin.firestore.FieldValue.arrayUnion(message),
+            })
+            .then((doc) => {
+                return res.status(201).json({ message: "Added succesfully" });
+            })
+            .catch((err) => {
+                console.log(err.code);
+                return res.status(500).json({ error: err.code });
+            });
+            }
+        )
+    }else return res.status(400).json({error: 'unauthenticated'})
+  
+});
+
+
+app.get("/messages/chatroom", (req, res) => {
+	const chatRoom = {
+		name: req.body.name
+	}
+
+	db.doc(`/chatroom/${chatRoom.name}`).get().then((doc)=>{
+		return res.status(201).json({doc})
+	}).catch((err) => {
+				
+		return res.status(500).json({ error: err.code });
+		
+	});
+});
+*/
+
 
 exports.api = functions.https.onRequest(app);
